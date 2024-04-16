@@ -10,7 +10,6 @@ use serde_json::{from_slice, to_vec, Value};
 fn main() -> Result<()> {
     let recs = 1_00;
 
-    // Writing records to a binary file
     let mut file = File::create("records.bin")?;
     for i in 1..=recs {
         let record = Record::new(
@@ -24,7 +23,6 @@ fn main() -> Result<()> {
         record.write_to(&mut file)?;
     }
 
-    // Reading records from the binary file
     let mut file = File::open("records.bin")?;
     for _ in 1..=recs {
         let record = Record::read_from(&mut file)?;
@@ -87,12 +85,6 @@ impl Record {
 
         let mut newline_bytes = [0; 1];
         reader.read_exact(&mut newline_bytes)?;
-
-        // let mut data_bytes = Vec::new();
-        // reader.read_until(&mut data_bytes)?;
-        // data_bytes.pop();
-        // data_bytes.pop();
-        // let data = from_slice(&data_bytes)?;
 
         Ok(Record {
             version,
