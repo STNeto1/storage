@@ -1,5 +1,5 @@
 use std::{
-    fs::{File, OpenOptions},
+    fs::OpenOptions,
     io::{Read, Write},
     path::Path,
     time::UNIX_EPOCH,
