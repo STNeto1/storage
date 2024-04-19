@@ -1,6 +1,8 @@
 use std::{
-    fs::File,
+    fs::{File, OpenOptions},
     io::{Read, Write},
+    path::Path,
+    time::UNIX_EPOCH,
 };
 
 use anyhow::Result;
@@ -8,25 +10,32 @@ use serde::{Deserialize, Serialize};
 use serde_json::{from_slice, to_vec, Value};
 
 fn main() -> Result<()> {
-    let recs = 1_00;
+    if !Path::new("data").exists() {
+        println!("Folder does not exist");
+        std::fs::create_dir("data")?;
+    }
 
-    let mut file = File::create("records.bin")?;
+    let recs = 1_000;
+
     for i in 1..=recs {
         let record = Record::new(
             i,
+            std::time::SystemTime::now()
+                .duration_since(UNIX_EPOCH)?
+                .as_secs(),
             Value::Array(vec![
                 Value::Null,
                 Value::Number(1.into()),
                 Value::String("hello".into()),
             ]),
         );
-        record.write_to(&mut file)?;
-    }
 
-    let mut file = File::open("records.bin")?;
-    for _ in 1..=recs {
-        let record = Record::read_from(&mut file)?;
-        println!("{:?}", record);
+        let mut file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .append(true)
+            .open(format!("data/records_{}.bin", Record::get_file_segment(i)))?;
+        record.write_to(&mut file)?;
     }
 
     Ok(())
@@ -41,20 +50,23 @@ struct Record {
 }
 
 impl Record {
-    fn new(id: u64, data: Value) -> Self {
+    fn new(id: u64, timestamp: u64, data: Value) -> Self {
         Self {
             version: 1,
             id,
-            timestamp: id * 1_000_000,
+            timestamp,
             data,
         }
+    }
+
+    fn get_file_segment(id: u64) -> u64 {
+        id / 100
     }
 
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         writer.write_all(&[self.version])?;
         writer.write_all(&self.id.to_be_bytes())?;
         writer.write_all(&self.timestamp.to_be_bytes())?;
-        // writer.write_all(&to_vec(&self.data)?)?;
         let data_bytes = to_vec(&self.data)?;
         let data_len = data_bytes.len() as u64;
         writer.write_all(&data_len.to_be_bytes())?;
