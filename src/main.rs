@@ -1,6 +1,6 @@
 use std::{
     fs::OpenOptions,
-    io::{Read, Write},
+    io::{self, BufRead, BufReader, Read, Write},
     path::Path,
     time::UNIX_EPOCH,
 };
@@ -15,27 +15,55 @@ fn main() -> Result<()> {
         std::fs::create_dir("data")?;
     }
 
-    let recs = 1_000;
+    // let recs = 1_000;
+    //
+    // for i in 1..=recs {
+    //     let record = Record::new(
+    //         i,
+    //         std::time::SystemTime::now()
+    //             .duration_since(UNIX_EPOCH)?
+    //             .as_secs(),
+    //         Value::Array(vec![
+    //             Value::Null,
+    //             Value::Number(1.into()),
+    //             Value::String("hello".into()),
+    //         ]),
+    //     );
+    //
+    //     let mut file = OpenOptions::new()
+    //         .create(true)
+    //         .write(true)
+    //         .append(true)
+    //         .open(format!("data/records_{}.bin", Record::get_file_segment(i)))?;
+    //     record.write_to(&mut file)?;
+    // }
 
-    for i in 1..=recs {
-        let record = Record::new(
-            i,
-            std::time::SystemTime::now()
-                .duration_since(UNIX_EPOCH)?
-                .as_secs(),
-            Value::Array(vec![
-                Value::Null,
-                Value::Number(1.into()),
-                Value::String("hello".into()),
-            ]),
-        );
+    // for i in 1..=recs {
+    //     let file_path = format!("data/records_{}.bin", Record::get_file_segment(i));
+    //     let mut file = OpenOptions::new().read(true).open(file_path)?;
+    //
+    //     let record = Record::read_from(&mut file)?;
+    //     println!("{:?}", record);
+    // }
 
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .append(true)
-            .open(format!("data/records_{}.bin", Record::get_file_segment(i)))?;
-        record.write_to(&mut file)?;
+    let id = 541;
+    let file_path = format!("data/records_{}.bin", Record::get_file_segment(id));
+    let mut file = OpenOptions::new().read(true).open(file_path)?;
+
+    loop {
+        match Record::read_from(&mut file) {
+            Ok(rec) => {
+                println!("{:?}", rec.id);
+                if rec.id == id {
+                    println!("record found => {:?}", rec);
+                    break;
+                }
+            }
+            Err(err) => {
+                println!("error reading contents: {err}");
+                break;
+            }
+        }
     }
 
     Ok(())
