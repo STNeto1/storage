@@ -1,8 +1,11 @@
 use std::{
+    collections::HashMap,
     fs::OpenOptions,
-    io::{self, BufRead, BufReader, Read, Write},
+    io::{self, BufRead, BufReader, Read, Seek, Write},
+    ops::Add,
     path::Path,
     time::UNIX_EPOCH,
+    u64,
 };
 
 use anyhow::Result;
@@ -15,56 +18,64 @@ fn main() -> Result<()> {
         std::fs::create_dir("data")?;
     }
 
-    // let recs = 1_000;
-    //
-    // for i in 1..=recs {
-    //     let record = Record::new(
-    //         i,
-    //         std::time::SystemTime::now()
-    //             .duration_since(UNIX_EPOCH)?
-    //             .as_secs(),
-    //         Value::Array(vec![
-    //             Value::Null,
-    //             Value::Number(1.into()),
-    //             Value::String("hello".into()),
-    //         ]),
-    //     );
-    //
-    //     let mut file = OpenOptions::new()
-    //         .create(true)
-    //         .write(true)
-    //         .append(true)
-    //         .open(format!("data/records_{}.bin", Record::get_file_segment(i)))?;
-    //     record.write_to(&mut file)?;
-    // }
+    let mut meta = Meta::new();
 
-    // for i in 1..=recs {
-    //     let file_path = format!("data/records_{}.bin", Record::get_file_segment(i));
-    //     let mut file = OpenOptions::new().read(true).open(file_path)?;
-    //
-    //     let record = Record::read_from(&mut file)?;
-    //     println!("{:?}", record);
-    // }
+    let recs = 1_00;
 
-    let id = 541;
+    for i in 1..=recs {
+        let record = Record::new(
+            i,
+            std::time::SystemTime::now()
+                .duration_since(UNIX_EPOCH)?
+                .as_secs(),
+            Value::Array(vec![
+                Value::Null,
+                Value::Number(1.into()),
+                Value::String("hello".into()),
+            ]),
+        );
+        meta.add_to_collection(record.id, record.size()?.into());
+
+        let mut file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .append(true)
+            .open(format!("data/records_{}.bin", Record::get_file_segment(i)))?;
+        record.write_to(&mut file)?;
+    }
+
+    let id = 82;
     let file_path = format!("data/records_{}.bin", Record::get_file_segment(id));
     let mut file = OpenOptions::new().read(true).open(file_path)?;
 
-    loop {
-        match Record::read_from(&mut file) {
-            Ok(rec) => {
-                println!("{:?}", rec.id);
-                if rec.id == id {
-                    println!("record found => {:?}", rec);
-                    break;
-                }
-            }
-            Err(err) => {
-                println!("error reading contents: {err}");
-                break;
-            }
+    file.seek(io::SeekFrom::Start(meta.get_from_collection(&id)))?;
+    match Record::read_from(&mut file) {
+        Ok(rec) => {
+            println!("record found => {:?}", rec,);
+        }
+        Err(err) => {
+            println!("error reading contents: {err}");
         }
     }
+
+    // loop {
+    //     match Record::read_from(&mut file) {
+    //         Ok(rec) => {
+    //             if rec.id == id {
+    //                 println!(
+    //                     "record found => {:?} | Offset => {:?}",
+    //                     rec,
+    //                     meta.get_from_collection(&rec.id)
+    //                 );
+    //                 break;
+    //             }
+    //         }
+    //         Err(err) => {
+    //             println!("error reading contents: {err}");
+    //             break;
+    //         }
+    //     }
+    // }
 
     Ok(())
 }
@@ -89,6 +100,19 @@ impl Record {
 
     fn get_file_segment(id: u64) -> u64 {
         id / 100
+    }
+
+    fn size(&self) -> Result<u64> {
+        let mut total = 0;
+
+        total += 1; // version byte
+        total += 8; // id bytes
+        total += 8; // timestamp bytes
+        total += 8; // datalen bytes
+        total += to_vec(&self.data)?.len() as u64; // data bytes
+        total += 1; // \n byte
+
+        Ok(total)
     }
 
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
@@ -132,5 +156,29 @@ impl Record {
             timestamp,
             data: from_slice(&data_bytes)?,
         })
+    }
+}
+
+#[derive(Debug)]
+struct Meta {
+    jumps: HashMap<u64, u64>,
+}
+
+impl Meta {
+    fn new() -> Self {
+        let mut jumps: HashMap<u64, u64> = HashMap::new();
+        jumps.insert(1, 0);
+
+        Self { jumps }
+    }
+
+    fn add_to_collection(&mut self, id: u64, size: u64) {
+        let val = self.jumps.get(&id).unwrap_or(&0).to_owned();
+
+        self.jumps.insert(id + 1, val + size);
+    }
+
+    fn get_from_collection(&self, id: &u64) -> u64 {
+        return self.jumps.get(&id).unwrap_or(&0).to_owned();
     }
 }
