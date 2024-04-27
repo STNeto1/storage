@@ -1,16 +1,15 @@
 use std::{
-    collections::HashMap,
     fs::OpenOptions,
-    io::{self, BufRead, BufReader, Read, Seek, Write},
-    ops::Add,
+    io::{self, Read, Seek, Write},
     path::Path,
     time::UNIX_EPOCH,
-    u64,
 };
 
-use anyhow::Result;
+use anyhow::{Context, Ok, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{from_slice, to_vec, Value};
+
+const MAX_FILE_LINES: usize = 100;
 
 fn main() -> Result<()> {
     if !Path::new("data").exists() {
@@ -20,7 +19,7 @@ fn main() -> Result<()> {
 
     let mut meta = Meta::new();
 
-    let recs = 1_00;
+    let recs = 2_00;
 
     for i in 1..=recs {
         let record = Record::new(
@@ -34,7 +33,7 @@ fn main() -> Result<()> {
                 Value::String("hello".into()),
             ]),
         );
-        meta.add_to_collection(record.id, record.size()?.into());
+        meta.add_to_collection(record.id, record.size()?.into())?;
 
         let mut file = OpenOptions::new()
             .create(true)
@@ -44,38 +43,14 @@ fn main() -> Result<()> {
         record.write_to(&mut file)?;
     }
 
-    let id = 82;
+    let id = 159;
     let file_path = format!("data/records_{}.bin", Record::get_file_segment(id));
     let mut file = OpenOptions::new().read(true).open(file_path)?;
 
-    file.seek(io::SeekFrom::Start(meta.get_from_collection(&id)))?;
-    match Record::read_from(&mut file) {
-        Ok(rec) => {
-            println!("record found => {:?}", rec,);
-        }
-        Err(err) => {
-            println!("error reading contents: {err}");
-        }
-    }
+    file.seek(io::SeekFrom::Start(meta.get_segment_offset(&id)?))?;
+    let rec = Record::read_from(&mut file)?;
 
-    // loop {
-    //     match Record::read_from(&mut file) {
-    //         Ok(rec) => {
-    //             if rec.id == id {
-    //                 println!(
-    //                     "record found => {:?} | Offset => {:?}",
-    //                     rec,
-    //                     meta.get_from_collection(&rec.id)
-    //                 );
-    //                 break;
-    //             }
-    //         }
-    //         Err(err) => {
-    //             println!("error reading contents: {err}");
-    //             break;
-    //         }
-    //     }
-    // }
+    println!("looking for {id} | record found => {:?}", rec);
 
     Ok(())
 }
@@ -99,7 +74,7 @@ impl Record {
     }
 
     fn get_file_segment(id: u64) -> u64 {
-        id / 100
+        id / MAX_FILE_LINES as u64
     }
 
     fn size(&self) -> Result<u64> {
@@ -161,24 +136,59 @@ impl Record {
 
 #[derive(Debug)]
 struct Meta {
-    jumps: HashMap<u64, u64>,
+    jumps: Vec<Vec<u64>>,
 }
 
 impl Meta {
     fn new() -> Self {
-        let mut jumps: HashMap<u64, u64> = HashMap::new();
-        jumps.insert(1, 0);
+        let jumps = vec![vec![0; MAX_FILE_LINES]; 0];
 
         Self { jumps }
     }
 
-    fn add_to_collection(&mut self, id: u64, size: u64) {
-        let val = self.jumps.get(&id).unwrap_or(&0).to_owned();
+    fn add_to_collection(&mut self, id: u64, size: u64) -> Result<()> {
+        let id = id - 1;
 
-        self.jumps.insert(id + 1, val + size);
+        let outer_ref: usize = (id / MAX_FILE_LINES as u64)
+            .try_into()
+            .context("Failed to divide?")?;
+
+        let offset = (MAX_FILE_LINES * outer_ref) as u64;
+
+        match self.jumps.get(outer_ref) {
+            Some(_) => (),
+            None => self.jumps.insert(outer_ref, vec![0; MAX_FILE_LINES]),
+        }
+
+        match id - offset {
+            0 => {
+                self.jumps[outer_ref][0] = 0;
+                self.jumps[outer_ref][1] = size;
+            }
+            val => {
+                self.jumps[outer_ref][val as usize] =
+                    self.jumps[outer_ref][(val - 1) as usize] + size;
+            }
+        }
+
+        Ok(())
     }
 
-    fn get_from_collection(&self, id: &u64) -> u64 {
-        return self.jumps.get(&id).unwrap_or(&0).to_owned();
+    fn get_segment_offset(&self, id: &u64) -> Result<u64> {
+        // let id = id - 1;
+
+        let outer_ref: usize = (id / MAX_FILE_LINES as u64)
+            .try_into()
+            .context("Failed to divide?")?;
+
+        let offset = (MAX_FILE_LINES * outer_ref) as u64;
+
+        match self.jumps.get(outer_ref) {
+            Some(cell) => match cell.get((id - offset) as usize) {
+                Some(val) => Ok(val.to_owned()),
+                None => anyhow::bail!("Value not found".to_string()),
+            },
+            None => anyhow::bail!("Cell not found".to_string()),
+        }
     }
 }
