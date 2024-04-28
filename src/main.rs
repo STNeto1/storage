@@ -153,14 +153,12 @@ impl Meta {
             .try_into()
             .context("Failed to divide?")?;
 
-        let offset = (MAX_FILE_LINES * outer_ref) as u64;
-
         match self.jumps.get(outer_ref) {
             Some(_) => (),
             None => self.jumps.insert(outer_ref, vec![0; MAX_FILE_LINES]),
         }
 
-        match id - offset {
+        match id % MAX_FILE_LINES as u64 {
             0 => {
                 self.jumps[outer_ref][0] = 0;
                 self.jumps[outer_ref][1] = size;
