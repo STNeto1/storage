@@ -179,10 +179,8 @@ impl Meta {
             .try_into()
             .context("Failed to divide?")?;
 
-        let offset = (MAX_FILE_LINES * outer_ref) as u64;
-
         match self.jumps.get(outer_ref) {
-            Some(cell) => match cell.get((id - offset) as usize) {
+            Some(cell) => match cell.get((id % MAX_FILE_LINES as u64) as usize) {
                 Some(val) => Ok(val.to_owned()),
                 None => anyhow::bail!("Value not found".to_string()),
             },
