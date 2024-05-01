@@ -19,7 +19,7 @@ fn main() -> Result<()> {
 
     let mut meta = Meta::new();
 
-    let recs = 2_00;
+    let recs = 1_50;
 
     for i in 1..=recs {
         let record = Record::new(
@@ -43,7 +43,7 @@ fn main() -> Result<()> {
         record.write_to(&mut file)?;
     }
 
-    let id = 159;
+    let id = 151;
     let file_path = format!("data/records_{}.bin", Record::get_file_segment(id));
     let mut file = OpenOptions::new().read(true).open(file_path)?;
 
@@ -179,12 +179,23 @@ impl Meta {
             .try_into()
             .context("Failed to divide?")?;
 
+        let relative_id = id % MAX_FILE_LINES as u64;
+
         match self.jumps.get(outer_ref) {
-            Some(cell) => match cell.get((id % MAX_FILE_LINES as u64) as usize) {
-                Some(val) => Ok(val.to_owned()),
-                None => anyhow::bail!("Value not found".to_string()),
-            },
-            None => anyhow::bail!("Cell not found".to_string()),
+            Some(cell) => {
+                if let Some(offset) = cell.get(relative_id as usize) {
+                    let offset = offset.to_owned();
+
+                    match (offset, relative_id) {
+                        (0, 0) => return Ok(offset), // Ok(0) basically
+                        (0, _) => anyhow::bail!("Invalid offset"),
+                        _ => return Ok(offset),
+                    }
+                } else {
+                    anyhow::bail!("Value should have been found");
+                }
+            }
+            None => anyhow::bail!("Page not found".to_string()),
         }
     }
 }
