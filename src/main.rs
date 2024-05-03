@@ -19,7 +19,7 @@ fn main() -> Result<()> {
 
     let mut meta = Meta::new();
 
-    let recs = 1_50;
+    let recs = 1_00;
 
     for i in 1..=recs {
         let record = Record::new(
@@ -43,14 +43,26 @@ fn main() -> Result<()> {
         record.write_to(&mut file)?;
     }
 
-    let id = 151;
+    let id = 58;
     let file_path = format!("data/records_{}.bin", Record::get_file_segment(id));
     let mut file = OpenOptions::new().read(true).open(file_path)?;
-
     file.seek(io::SeekFrom::Start(meta.get_segment_offset(&id)?))?;
-    let rec = Record::read_from(&mut file)?;
-
+    let mut rec = Record::read_from(&mut file)?;
     println!("looking for {id} | record found => {:?}", rec);
+
+    let mut file = OpenOptions::new().append(true).open(file_path)?;
+    let record = Record::new(
+        id,
+        std::time::SystemTime::now()
+            .duration_since(UNIX_EPOCH)?
+            .as_secs(),
+        Value::Array(vec![
+            Value::String("hello".into()),
+            Value::Null,
+            Value::Number(10),
+        ]),
+    );
+    file.seek(io::SeekFrom::Start(meta.get_segment_offset(&id)?))?;
 
     Ok(())
 }
