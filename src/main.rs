@@ -59,7 +59,7 @@ fn main() -> Result<()> {
         Value::Array(vec![
             Value::String("hello".into()),
             Value::Null,
-            Value::Number(10),
+            Value::Number(10.into()),
         ]),
     );
     file.seek(io::SeekFrom::Start(meta.get_segment_offset(&id)?))?;
