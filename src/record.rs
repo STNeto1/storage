@@ -83,3 +83,15 @@ impl Record {
         })
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_file_segment_from_plain_id() {
+        assert_eq!(Record::get_file_segment(1), 0);
+        assert_eq!(Record::get_file_segment(100), 0);
+        assert_eq!(Record::get_file_segment(101), 1);
+    }
+}
