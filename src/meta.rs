@@ -3,19 +3,22 @@ use std::{fs, sync::Mutex, usize};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::META_FILE;
+use crate::{record, META_FILE};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Meta {
-    sequence: u64,
-    jumps: Vec<Option<u64>>,
+    sequence: Vec<u64>,
+    jumps: Vec<Vec<Option<u64>>>,
 }
 
 impl Meta {
     pub fn new() -> Self {
-        let jumps = vec![None; 0];
+        let jumps = vec![];
 
-        Self { sequence: 0, jumps }
+        Self {
+            sequence: vec![],
+            jumps,
+        }
     }
 
     pub fn read_from_file() -> Result<Self> {
@@ -33,15 +36,36 @@ impl Meta {
     }
 
     pub fn add_to_collection(&mut self, id: u64, size: u64) -> Result<()> {
+        let segment = record::Record::get_file_segment(id);
+
+        match self.jumps.get(segment as usize) {
+            Some(_) => (),
+            None => self.jumps.insert(segment as usize, vec![]),
+        }
+
+        match self.sequence.get(segment as usize) {
+            Some(_) => (),
+            None => self.sequence.insert(segment as usize, 0),
+        }
+
+        let segment_sequence = self
+            .sequence
+            .get(segment as usize)
+            .context("should be at least defined above")?;
+        let segment_page = self
+            .jumps
+            .get_mut(segment as usize)
+            .context("should be at least defined above")?;
+
         match id {
             1 => {
-                self.jumps.insert(0, Some(0));
-                self.jumps.insert(1, Some(size));
+                segment_page.insert(0, Some(0));
+                segment_page.insert(1, Some(size));
             }
-            val => match self.jumps.get((val - 1) as usize) {
+            val => match segment_page.get((val - 1) as usize) {
                 Some(back_value) => match back_value {
                     Some(inner_value) => {
-                        self.jumps.insert(val as usize, Some(inner_value + size));
+                        segment_page.insert(val as usize, Some(inner_value + size));
                     }
                     _ => unimplemented!("Back value exists but is None"),
                 },
@@ -51,18 +75,35 @@ impl Meta {
             },
         }
 
-        self.sequence += 1;
+        self.sequence[segment as usize] = segment_sequence + 1;
 
         Ok(())
     }
 
     pub fn get_segment_offset(&self, id: &u64) -> Result<u64> {
-        // Value should exist before being set-up
-        if id.to_owned() > self.sequence {
-            anyhow::bail!("Value doesn't exist yet");
+        let segment = record::Record::get_file_segment(id.to_owned());
+
+        match self.jumps.get(segment as usize) {
+            Some(_) => (),
+            None => anyhow::bail!("Page does not exist"),
         }
 
-        match self.jumps.get((id - 1) as usize) {
+        match self.sequence.get(segment as usize) {
+            Some(seq) => {
+                // Value should exist before being set-up
+                if id.to_owned() > seq.to_owned() {
+                    anyhow::bail!("Value doesn't exist yet");
+                }
+            }
+            None => anyhow::bail!("Sequence does not exist"),
+        }
+
+        let segment_page = self
+            .jumps
+            .get(segment as usize)
+            .context("should be at least defined above")?;
+
+        match segment_page.get((id - 1) as usize) {
             Some(cell) => match cell {
                 Some(offset) => Ok(offset.to_owned()),
                 None => anyhow::bail!("Offset was set yet?"),
@@ -96,30 +137,50 @@ mod test {
         meta.add_to_collection(3, 20)
             .context("should add without issues")?;
 
-        // [Some(0), Some(10), Some(25), Some(45)]
-        // [^1       ^2        ^3        ^4
+        // [[Some(0), Some(10), Some(25), Some(45)]]
+        //   ^1       ^2        ^3        ^4
 
         // id => 1
         assert_eq!(
-            meta.jumps.get(0).context("should exist")?.to_owned(),
+            meta.jumps
+                .get(0)
+                .context("page should exist")?
+                .get(0)
+                .context("should exist")?
+                .to_owned(),
             Some(0)
         );
 
         // id => 2
         assert_eq!(
-            meta.jumps.get(1).context("should exist")?.to_owned(),
+            meta.jumps
+                .get(0)
+                .context("page should exist")?
+                .get(1)
+                .context("should exist")?
+                .to_owned(),
             Some(10)
         );
 
         // id => 3
         assert_eq!(
-            meta.jumps.get(2).context("should exist")?.to_owned(),
+            meta.jumps
+                .get(0)
+                .context("page should exist")?
+                .get(2)
+                .context("should exist")?
+                .to_owned(),
             Some(25)
         );
 
         // id => 4 (doesn't exist yet?)
         assert_eq!(
-            meta.jumps.get(3).context("should exist")?.to_owned(),
+            meta.jumps
+                .get(0)
+                .context("page should exist")?
+                .get(3)
+                .context("should exist")?
+                .to_owned(),
             Some(45)
         );
 
@@ -137,8 +198,8 @@ mod test {
         meta.add_to_collection(3, 20)
             .context("should add without issues")?;
 
-        // [Some(0), Some(10), Some(25), Some(45)]
-        // [^1       ^2        ^3        ^4
+        // [[Some(0), Some(10), Some(25), Some(45)]]
+        //   ^1       ^2        ^3        ^4
 
         assert_eq!(
             meta.get_segment_offset(&1)
