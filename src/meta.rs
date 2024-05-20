@@ -1,20 +1,21 @@
-use std::fs;
+use std::{fs, sync::Mutex, usize};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::{MAX_FILE_LINES, META_FILE};
+use crate::META_FILE;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Meta {
-    jumps: Vec<Vec<u64>>,
+    sequence: u64,
+    jumps: Vec<Option<u64>>,
 }
 
 impl Meta {
     pub fn new() -> Self {
-        let jumps = vec![vec![0; MAX_FILE_LINES]; 0];
+        let jumps = vec![None; 0];
 
-        Self { jumps }
+        Self { sequence: 0, jumps }
     }
 
     pub fn read_from_file() -> Result<Self> {
@@ -32,57 +33,136 @@ impl Meta {
     }
 
     pub fn add_to_collection(&mut self, id: u64, size: u64) -> Result<()> {
-        let id = id - 1;
-
-        let page: usize = (id / MAX_FILE_LINES as u64)
-            .try_into()
-            .context("Failed to divide?")?;
-
-        match self.jumps.get(page) {
-            Some(_) => (),
-            None => self.jumps.insert(page, vec![0; MAX_FILE_LINES]),
+        match id {
+            1 => {
+                self.jumps.insert(0, Some(0));
+                self.jumps.insert(1, Some(size));
+            }
+            val => match self.jumps.get((val - 1) as usize) {
+                Some(back_value) => match back_value {
+                    Some(inner_value) => {
+                        self.jumps.insert(val as usize, Some(inner_value + size));
+                    }
+                    _ => unimplemented!("Back value exists but is None"),
+                },
+                None => {
+                    unreachable!("Back value doesn't exist");
+                }
+            },
         }
 
-        match id % MAX_FILE_LINES as u64 {
-            0 => {
-                self.jumps[page][0] = 0;
-                // self.jumps[page][1] = size;
-            }
-            val => {
-                self.jumps[page][val as usize] = self.jumps[page][(val - 1) as usize] + size;
-            }
-        }
+        self.sequence += 1;
 
         Ok(())
     }
 
     pub fn get_segment_offset(&self, id: &u64) -> Result<u64> {
-        let id = id - 1;
-
-        let page_idx: usize = (id / MAX_FILE_LINES as u64)
-            .try_into()
-            .context("Failed to divide?")?;
-
-        // println!("{id} - {page_idx}");
-
-        let relative_id: u64 = id % MAX_FILE_LINES as u64;
-
-        match self.jumps.get(page_idx) {
-            Some(cell) => {
-                if let Some(offset) = cell.get((relative_id) as usize) {
-                    let offset = offset.to_owned();
-
-                    // value isn't initialized but is truing to access it
-                    if offset == 0 && relative_id != 0 {
-                        anyhow::bail!("Invalid offset");
-                    }
-
-                    return Ok(offset);
-                } else {
-                    anyhow::bail!("Value should have been found");
-                }
-            }
-            None => anyhow::bail!("Page not found".to_string()),
+        // Value should exist before being set-up
+        if id.to_owned() > self.sequence {
+            anyhow::bail!("Value doesn't exist yet");
         }
+
+        match self.jumps.get((id - 1) as usize) {
+            Some(cell) => match cell {
+                Some(offset) => Ok(offset.to_owned()),
+                None => anyhow::bail!("Offset was set yet?"),
+            },
+            None => anyhow::bail!("Record not found".to_string()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::record::Record;
+    use anyhow::Result;
+
+    #[test]
+    fn test_file_segment_from_plain_id() {
+        assert_eq!(Record::get_file_segment(1), 0);
+        assert_eq!(Record::get_file_segment(100), 0);
+        assert_eq!(Record::get_file_segment(101), 1);
+    }
+
+    #[test]
+    fn test_adding_to_collection() -> Result<()> {
+        let mut meta = Meta::new();
+
+        meta.add_to_collection(1, 10)
+            .context("should add without issues")?;
+        meta.add_to_collection(2, 15)
+            .context("should add without issues")?;
+        meta.add_to_collection(3, 20)
+            .context("should add without issues")?;
+
+        // [Some(0), Some(10), Some(25), Some(45)]
+        // [^1       ^2        ^3        ^4
+
+        // id => 1
+        assert_eq!(
+            meta.jumps.get(0).context("should exist")?.to_owned(),
+            Some(0)
+        );
+
+        // id => 2
+        assert_eq!(
+            meta.jumps.get(1).context("should exist")?.to_owned(),
+            Some(10)
+        );
+
+        // id => 3
+        assert_eq!(
+            meta.jumps.get(2).context("should exist")?.to_owned(),
+            Some(25)
+        );
+
+        // id => 4 (doesn't exist yet?)
+        assert_eq!(
+            meta.jumps.get(3).context("should exist")?.to_owned(),
+            Some(45)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_fetching_to_collection() -> Result<()> {
+        let mut meta = Meta::new();
+
+        meta.add_to_collection(1, 10)
+            .context("should add without issues")?;
+        meta.add_to_collection(2, 15)
+            .context("should add without issues")?;
+        meta.add_to_collection(3, 20)
+            .context("should add without issues")?;
+
+        // [Some(0), Some(10), Some(25), Some(45)]
+        // [^1       ^2        ^3        ^4
+
+        assert_eq!(
+            meta.get_segment_offset(&1)
+                .context("should exist")?
+                .to_owned(),
+            0
+        );
+
+        assert_eq!(
+            meta.get_segment_offset(&2)
+                .context("should exist")?
+                .to_owned(),
+            10
+        );
+
+        assert_eq!(
+            meta.get_segment_offset(&3)
+                .context("should exist")?
+                .to_owned(),
+            25
+        );
+
+        assert!(meta.get_segment_offset(&4).is_err());
+
+        Ok(())
     }
 }
