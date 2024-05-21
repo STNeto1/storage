@@ -17,10 +17,10 @@ mod record;
 fn main() -> Result<()> {
     check_base_line()?;
 
-    // let mut meta = Meta::read_from_file()?;
-    let mut meta = meta::Meta::new();
+    let mut meta = meta::Meta::read_from_file()?;
+    // let mut meta = meta::Meta::new();
 
-    let recs = 110;
+    let recs = 201;
 
     for i in 1..=recs {
         let row = record::Record::new(
@@ -45,42 +45,22 @@ fn main() -> Result<()> {
                 record::Record::get_file_segment(i)
             ))?;
         row.write_to(&mut file)?;
+
+        // match (i - 1) % MAX_FILE_LINES as u64 {
+        //     val => println!("written to {i} {}", val),
+        // }
     }
 
     meta.write_to_file()?;
 
-    let id = 100;
-    let file_path = format!("data/records_{}.bin", record::Record::get_file_segment(id));
-    let mut file = OpenOptions::new().read(true).open(file_path.to_owned())?;
-    file.seek(io::SeekFrom::Start(meta.get_segment_offset(&id)?))?;
-    let rec = record::Record::read_from(&mut file)?;
-    println!(
-        "looking for {id} | page -> {file_path} | found => {:?}",
-        rec
-    );
+    for id in 1..=recs {
+        let file_path = format!("data/records_{}.bin", record::Record::get_file_segment(id));
 
-    // for id in 1..=recs {
-    //     let file_path = format!("data/records_{}.bin", Record::get_file_segment(id));
-    //
-    //     let mut file = OpenOptions::new().read(true).open(file_path.to_owned())?;
-    //     file.seek(io::SeekFrom::Start(meta.get_segment_offset(&id)?))?;
-    //     let rec = Record::read_from(&mut file)?;
-    //     // println!("looking for {id} | found => {:?}", rec);
-    // }
-
-    // let mut file = OpenOptions::new().append(true).open(file_path)?;
-    // let record = Record::new(
-    //     id,
-    //     std::time::SystemTime::now()
-    //         .duration_since(UNIX_EPOCH)?
-    //         .as_secs(),
-    //     Value::Array(vec![
-    //         Value::String("hello".into()),
-    //         Value::Null,
-    //         Value::Number(10.into()),
-    //     ]),
-    // );
-    // file.seek(io::SeekFrom::Start(meta.get_segment_offset(&id)?))?;
+        let mut file = OpenOptions::new().read(true).open(file_path.to_owned())?;
+        file.seek(io::SeekFrom::Start(meta.get_segment_offset(&id)?))?;
+        let rec = record::Record::read_from(&mut file)?;
+        println!("looking for {id} | found => {:?}", rec);
+    }
 
     Ok(())
 }
